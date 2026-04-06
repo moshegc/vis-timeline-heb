@@ -216,7 +216,7 @@
       "prettier --write"
     ],
     ".*.{css,html,json,md,yml,yaml}": "prettier --write",
-    ".*.{js,ts}": [
+    "{dev-lib,lib,scripts,src,test,types,docs,examples}/**/*.{js,ts}": [
       "eslint --fix",
       "prettier --write"
     ]
