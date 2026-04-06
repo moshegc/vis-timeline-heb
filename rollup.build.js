@@ -13,6 +13,8 @@ export default generateRollupConfiguration({
     moment: "moment",
     uuid: "uuid",
     xss: "filterXSS",
+    "@hebcal/core": "Hebcal",
+    "@hebcal/hdate": "HDate",
   },
   header: { name: "vis-timeline and vis-graph2d" },
   libraryFilename: "vis-timeline-graph2d",
