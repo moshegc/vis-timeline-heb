@@ -210,8 +210,8 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{css,html,json,md,yml,yaml}": "prettier --write",
-    ".*.{css,html,json,md,yml,yaml}": "prettier --write",
+    "*.{html,json,md,yml,yaml}": "prettier --write",
+    ".*.{html,json,md,yml,yaml}": "prettier --write",
     "{dev-lib,lib,scripts,src,test,types,docs,examples}/**/*.{js,ts}": [
       "eslint --fix",
       "prettier --write"
