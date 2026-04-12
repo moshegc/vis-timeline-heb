@@ -5,7 +5,7 @@
  * Create a fully customizable, interactive timeline with items and ranges.
  *
  * @version 0.0.0-no-version
- * @date    2026-04-06T16:39:07.723Z
+ * @date    2026-04-12T14:54:27.209Z
  *
  * @copyright (c) 2011-2017 Almende B.V, http://almende.com
  * @copyright (c) 2017-2019 visjs contributors, https://github.com/visjs
@@ -44645,7 +44645,8 @@ class ClusterGenerator {
   getClusters(oldClusters, scale, options) {
     let {
       maxItems,
-      clusterCriteria
+      clusterCriteria,
+      uniformItemWidth
     } = typeof options === "boolean" ? {} : options;
     if (!clusterCriteria) {
       clusterCriteria = () => true;
@@ -44680,61 +44681,93 @@ class ClusterGenerator {
         const items = this.groups[groupName];
         const iMax = items.length;
         let i = 0;
-        while (i < iMax) {
-          // find all items around current item, within the timeWindow
-          let item = items[i];
-          let neighbors = 1; // start at 1, to include itself)
+        if (uniformItemWidth) {
+          // Fast path: all items are the same width, skip per-item neighbor
+          // scanning and clusterCriteria checks. Items are already sorted by
+          // center (done in _filterData), so we can stride through them using
+          // a single forward scan.
+          const halfWindow = timeWindow / 2;
+          while (i < iMax) {
+            const item = items[i];
 
-          // loop through items left from the current item
-          let j = i - 1;
-          while (j >= 0 && item.center - items[j].center < timeWindow / 2) {
-            if (!items[j].cluster && clusterCriteria(item.data, items[j].data)) {
-              neighbors++;
+            // Find how many consecutive items fall within this time window.
+            // Because items are sorted, we only need to scan forward.
+            let windowEnd = i + 1;
+            while (windowEnd < iMax && items[windowEnd].center - item.center < halfWindow) {
+              windowEnd++;
             }
-            j--;
-          }
-
-          // loop through items right from the current item
-          let k = i + 1;
-          while (k < items.length && items[k].center - item.center < timeWindow / 2) {
-            if (clusterCriteria(item.data, items[k].data)) {
-              neighbors++;
+            const neighbors = windowEnd - i;
+            if (neighbors > maxItems) {
+              const num = neighbors - maxItems + 1;
+              const clusterItems = _sliceInstanceProperty(items).call(items, i, i + num);
+              const groupId = this.itemSet.getGroupId(item.data);
+              const group = this.itemSet.groups[groupId] || this.itemSet.groups[ReservedGroupIds.UNGROUPED];
+              let cluster = this._getClusterForItems(clusterItems, group, oldClusters, options);
+              clusters.push(cluster);
+              i += num;
+            } else {
+              delete item.cluster;
+              i += 1;
             }
-            k++;
           }
+        } else {
+          // General path: per-item neighbor scanning with clusterCriteria
+          while (i < iMax) {
+            // find all items around current item, within the timeWindow
+            let item = items[i];
+            let neighbors = 1; // start at 1, to include itself)
 
-          // loop through the created clusters
-          let l = clusters.length - 1;
-          while (l >= 0 && item.center - clusters[l].center < timeWindow) {
-            if (item.group == clusters[l].group && clusterCriteria(item.data, clusters[l].data)) {
-              neighbors++;
-            }
-            l--;
-          }
-
-          // aggregate until the number of items is within maxItems
-          if (neighbors > maxItems) {
-            // too busy in this window.
-            const num = neighbors - maxItems + 1;
-            const clusterItems = [];
-
-            // append the items to the cluster,
-            // and calculate the average start for the cluster
-            let m = i;
-            while (clusterItems.length < num && m < items.length) {
-              if (clusterCriteria(items[i].data, items[m].data)) {
-                clusterItems.push(items[m]);
+            // loop through items left from the current item
+            let j = i - 1;
+            while (j >= 0 && item.center - items[j].center < timeWindow / 2) {
+              if (!items[j].cluster && clusterCriteria(item.data, items[j].data)) {
+                neighbors++;
               }
-              m++;
+              j--;
             }
-            const groupId = this.itemSet.getGroupId(item.data);
-            const group = this.itemSet.groups[groupId] || this.itemSet.groups[ReservedGroupIds.UNGROUPED];
-            let cluster = this._getClusterForItems(clusterItems, group, oldClusters, options);
-            clusters.push(cluster);
-            i += num;
-          } else {
-            delete item.cluster;
-            i += 1;
+
+            // loop through items right from the current item
+            let k = i + 1;
+            while (k < items.length && items[k].center - item.center < timeWindow / 2) {
+              if (clusterCriteria(item.data, items[k].data)) {
+                neighbors++;
+              }
+              k++;
+            }
+
+            // loop through the created clusters
+            let l = clusters.length - 1;
+            while (l >= 0 && item.center - clusters[l].center < timeWindow) {
+              if (item.group == clusters[l].group && clusterCriteria(item.data, clusters[l].data)) {
+                neighbors++;
+              }
+              l--;
+            }
+
+            // aggregate until the number of items is within maxItems
+            if (neighbors > maxItems) {
+              // too busy in this window.
+              const num = neighbors - maxItems + 1;
+              const clusterItems = [];
+
+              // append the items to the cluster,
+              // and calculate the average start for the cluster
+              let m = i;
+              while (clusterItems.length < num && m < items.length) {
+                if (clusterCriteria(items[i].data, items[m].data)) {
+                  clusterItems.push(items[m]);
+                }
+                m++;
+              }
+              const groupId = this.itemSet.getGroupId(item.data);
+              const group = this.itemSet.groups[groupId] || this.itemSet.groups[ReservedGroupIds.UNGROUPED];
+              let cluster = this._getClusterForItems(clusterItems, group, oldClusters, options);
+              clusters.push(cluster);
+              i += num;
+            } else {
+              delete item.cluster;
+              i += 1;
+            }
           }
         }
       }
@@ -48173,6 +48206,10 @@ let allOptions$1 = {
     },
     clusterCriteria: {
       function: "function",
+      undefined: "undefined"
+    },
+    uniformItemWidth: {
+      boolean: bool$1,
       undefined: "undefined"
     },
     showStipes: {
