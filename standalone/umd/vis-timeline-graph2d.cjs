@@ -5,7 +5,7 @@
  * Create a fully customizable, interactive timeline with items and ranges.
  *
  * @version 0.0.0-no-version
- * @date    2026-04-12T14:54:04.772Z
+ * @date    2026-04-14T07:59:20.303Z
  *
  * @copyright (c) 2011-2017 Almende B.V, http://almende.com
  * @copyright (c) 2017-2019 visjs contributors, https://github.com/visjs
@@ -40875,6 +40875,12 @@
         this.heightMode = itemSet.options.groupHeightMode;
       }
       this.nestedInGroup = null;
+
+      // Per-group uniform items LOD flag — when true and items are sub-pixel,
+      // use the fast repositionXFast path (skips stacking and repositionY).
+      this.uniformItems = data && data.uniformItems === true;
+      this._uniformItemsFrozen = false;
+      this._uniformItemsHasStacked = false;
       this.dom = {};
       this.props = {
         label: {
@@ -41023,6 +41029,11 @@
         this.stackOverride = data.stack;
       }
 
+      // Per-group uniform items LOD flag (re-apply on data update)
+      if (data && typeof data.uniformItems === "boolean") {
+        this.uniformItems = data.uniformItems;
+      }
+
       // update className
       const className = data && data.className || null;
       if (className != this.className) {
@@ -41154,6 +41165,11 @@
       // if restacking, reposition visible items vertically
       if (restack) {
         var _context2, _context3, _context4, _context5, _context6, _context7;
+        // --- uniformItems LOD: determine if fast path is active this frame ---
+        // When active, item discovery and DOM creation still run normally, but
+        // stacking, full repositionX, and repositionY are replaced with the
+        // lightweight repositionXFast.
+        this._uniformItemsFrozen = this.uniformItems && this.itemSet.initialDrawDone && this._uniformItemsHasStacked && this._areUniformItemsTooSmall(range);
         const orderedItems = {
           byEnd: _filterInstanceProperty(_context2 = this.orderedItems.byEnd).call(_context2, item => !item.isCluster),
           byStart: _filterInstanceProperty(_context3 = this.orderedItems.byStart).call(_context3, item => !item.isCluster)
@@ -41189,7 +41205,10 @@
           }
           return visibleSubgroupsItems;
         };
-        if (typeof this.itemSet.options.order === "function") {
+        if (this._uniformItemsFrozen) {
+          // LOD fast path: discover items normally but skip stacking
+          this.visibleItems = getVisibleItems();
+        } else if (typeof this.itemSet.options.order === "function") {
           // a custom order function
           //show all items
           const me = this;
@@ -41233,7 +41252,16 @@
           }
         }
         for (let i = 0; i < this.visibleItems.length; i++) {
-          this.visibleItems[i].repositionX();
+          if (this._uniformItemsFrozen) {
+            const item = this.visibleItems[i];
+            if (typeof item.repositionXFast === 'function') {
+              item.repositionXFast();
+            } else {
+              item.repositionX();
+            }
+          } else {
+            this.visibleItems[i].repositionX();
+          }
           if (this.subgroupVisibility[this.visibleItems[i].data.subgroup] !== undefined) {
             if (!this.subgroupVisibility[this.visibleItems[i].data.subgroup]) {
               this.visibleItems[i].hide();
@@ -41251,6 +41279,9 @@
           this.itemSet.body.emitter.emit("destroyTimeline");
         }
         this.stackDirty = false;
+        if (this.uniformItems && !this.shouldBailStackItems) {
+          this._uniformItemsHasStacked = true;
+        }
       }
     }
 
@@ -41369,6 +41400,30 @@
           }
         });
       }
+    }
+
+    /**
+     * Check whether the items in this group are too small to warrant full
+     * repositioning (sub-pixel). Uses the first visible item to compute pixel
+     * width and compares against a threshold (default 2px).
+     *
+     * @param {{start: number, end: number}} range  current visible range
+     * @returns {boolean}
+     * @private
+     */
+    _areUniformItemsTooSmall(range) {
+      const threshold = 2; // pixels
+      const items = this.visibleItems.length ? this.visibleItems : this.orderedItems.byStart;
+      if (items.length === 0) return false;
+      for (let i = 0; i < 1; i++) {
+        const d = items[i].data;
+        if (d.start != null && d.end != null) {
+          const msPerPixel = (range.end - range.start) / this.itemSet.body.domProps.centerContainer.width;
+          const px = (d.end - d.start) / msPerPixel;
+          return px < threshold;
+        }
+      }
+      return false;
     }
 
     /**
@@ -41757,7 +41812,11 @@
         }
       }
       for (let i = 0; i < visibleItems.length; i++) {
-        visibleItems[i].repositionX();
+        if (this._uniformItemsFrozen && typeof visibleItems[i].repositionXFast === 'function') {
+          visibleItems[i].repositionXFast();
+        } else {
+          visibleItems[i].repositionX();
+        }
       }
       return visibleItems;
     }
@@ -42855,6 +42914,21 @@
     }
 
     /**
+     * Fast horizontal reposition — sets only the box transform (1 DOM write).
+     * Used by the per-group uniformItems LOD path when items are sub-pixel.
+     */
+    repositionXFast() {
+      const start = this.conversion.toScreen(this.data.start);
+      this.boxX = start - this.width / 2;
+      if (this.options.rtl) {
+        this.right = this.boxX;
+      } else {
+        this.left = this.boxX;
+      }
+      this.repositionXY();
+    }
+
+    /**
      * Reposition the item vertically
      * @Override
      */
@@ -43170,6 +43244,21 @@
      * @Override
      */
     repositionX() {
+      const start = this.conversion.toScreen(this.data.start);
+      this.pointX = start;
+      if (this.options.rtl) {
+        this.right = start - this.props.dot.width;
+      } else {
+        this.left = start - this.props.dot.width;
+      }
+      this.repositionXY();
+    }
+
+    /**
+     * Fast horizontal reposition — sets only the point transform (1 DOM write).
+     * Used by the per-group uniformItems LOD path when items are sub-pixel.
+     */
+    repositionXFast() {
       const start = this.conversion.toScreen(this.data.start);
       this.pointX = start;
       if (this.options.rtl) {
@@ -43544,6 +43633,37 @@
             // this.dom.content.style.width = `calc(100% - ${contentStartPosition}px)`;
           }
       }
+    }
+
+    /**
+     * Fast horizontal reposition — sets only the transform (1 DOM write).
+     * Used by the per-group uniformItems LOD path when items are sub-pixel.
+     */
+    repositionXFast() {
+      const parentWidth = this.parent.width;
+      let start = this.conversion.toScreen(this.data.start);
+      let end = this.conversion.toScreen(this.data.end);
+
+      // Apply the same limit-size clamping as repositionX to prevent
+      // extreme values that browsers cannot render.
+      if (this.data.limitSize !== false) {
+        if (start < -parentWidth) {
+          start = -parentWidth;
+        }
+        if (end > 2 * parentWidth) {
+          end = 2 * parentWidth;
+        }
+      }
+      const boxWidth = Math.max(Math.round((end - start) * 1000) / 1000, 1);
+      if (this.options.rtl) {
+        this.right = start;
+        this.dom.box.style.transform = "translateX(".concat(start * -1, "px)");
+      } else {
+        this.left = start;
+        this.dom.box.style.transform = "translateX(".concat(start, "px)");
+      }
+      this.width = boxWidth;
+      this.dom.box.style.width = "".concat(boxWidth, "px");
     }
 
     /**
