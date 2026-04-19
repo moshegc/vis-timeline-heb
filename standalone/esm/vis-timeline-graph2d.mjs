@@ -5,7 +5,7 @@
  * Create a fully customizable, interactive timeline with items and ranges.
  *
  * @version 0.0.0-no-version
- * @date    2026-04-14T07:59:20.303Z
+ * @date    2026-04-19T06:44:17.642Z
  *
  * @copyright (c) 2011-2017 Almende B.V, http://almende.com
  * @copyright (c) 2017-2019 visjs contributors, https://github.com/visjs
@@ -41249,7 +41249,7 @@ class Group {
       for (let i = 0; i < this.visibleItems.length; i++) {
         if (this._uniformItemsFrozen) {
           const item = this.visibleItems[i];
-          if (typeof item.repositionXFast === 'function') {
+          if (typeof item.repositionXFast === "function") {
             item.repositionXFast();
           } else {
             item.repositionX();
@@ -41807,7 +41807,7 @@ class Group {
       }
     }
     for (let i = 0; i < visibleItems.length; i++) {
-      if (this._uniformItemsFrozen && typeof visibleItems[i].repositionXFast === 'function') {
+      if (this._uniformItemsFrozen && typeof visibleItems[i].repositionXFast === "function") {
         visibleItems[i].repositionXFast();
       } else {
         visibleItems[i].repositionX();
@@ -42911,6 +42911,7 @@ class BoxItem extends Item {
   /**
    * Fast horizontal reposition — sets only the box transform (1 DOM write).
    * Used by the per-group uniformItems LOD path when items are sub-pixel.
+   * Caches rounded pixel values to skip redundant DOM writes during zoom.
    */
   repositionXFast() {
     const start = this.conversion.toScreen(this.data.start);
@@ -42920,6 +42921,13 @@ class BoxItem extends Item {
     } else {
       this.left = this.boxX;
     }
+
+    // Skip DOM writes if the pixel position hasn't changed
+    const roundedX = Math.round(this.boxX);
+    if (roundedX === this._lastFastPx) {
+      return;
+    }
+    this._lastFastPx = roundedX;
     this.repositionXY();
   }
 
@@ -43252,6 +43260,7 @@ class PointItem extends Item {
   /**
    * Fast horizontal reposition — sets only the point transform (1 DOM write).
    * Used by the per-group uniformItems LOD path when items are sub-pixel.
+   * Caches rounded pixel values to skip redundant DOM writes during zoom.
    */
   repositionXFast() {
     const start = this.conversion.toScreen(this.data.start);
@@ -43261,6 +43270,13 @@ class PointItem extends Item {
     } else {
       this.left = start - this.props.dot.width;
     }
+
+    // Skip DOM writes if the pixel position hasn't changed
+    const roundedX = Math.round(start);
+    if (roundedX === this._lastFastPx) {
+      return;
+    }
+    this._lastFastPx = roundedX;
     this.repositionXY();
   }
 
@@ -43633,6 +43649,7 @@ class RangeItem extends Item {
   /**
    * Fast horizontal reposition — sets only the transform (1 DOM write).
    * Used by the per-group uniformItems LOD path when items are sub-pixel.
+   * Caches rounded pixel values to skip redundant DOM writes during zoom.
    */
   repositionXFast() {
     const parentWidth = this.parent.width;
@@ -43650,14 +43667,28 @@ class RangeItem extends Item {
       }
     }
     const boxWidth = Math.max(Math.round((end - start) * 1000) / 1000, 1);
+
+    // Round to integer pixel to detect actual visual change
+    const roundedStart = Math.round(start);
+    const roundedWidth = Math.round(boxWidth);
     if (this.options.rtl) {
       this.right = start;
-      this.dom.box.style.transform = "translateX(".concat(start * -1, "px)");
     } else {
       this.left = start;
-      this.dom.box.style.transform = "translateX(".concat(start, "px)");
     }
     this.width = boxWidth;
+
+    // Skip DOM writes if the pixel position and width haven't changed
+    if (roundedStart === this._lastFastPx && roundedWidth === this._lastFastW) {
+      return;
+    }
+    this._lastFastPx = roundedStart;
+    this._lastFastW = roundedWidth;
+    if (this.options.rtl) {
+      this.dom.box.style.transform = "translateX(".concat(start * -1, "px)");
+    } else {
+      this.dom.box.style.transform = "translateX(".concat(start, "px)");
+    }
     this.dom.box.style.width = "".concat(boxWidth, "px");
   }
 
