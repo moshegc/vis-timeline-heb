@@ -5,7 +5,7 @@
  * Create a fully customizable, interactive timeline with items and ranges.
  *
  * @version 0.0.0-no-version
- * @date    2026-04-19T06:44:39.905Z
+ * @date    2026-05-09T20:31:32.341Z
  *
  * @copyright (c) 2011-2017 Almende B.V, http://almende.com
  * @copyright (c) 2017-2019 visjs contributors, https://github.com/visjs
@@ -41080,19 +41080,30 @@ class Group {
    * @param {boolean} lastIsVisible
    * @param {number} margin
    * @param {object} range
+   * @param {boolean} [scrolledOnly=false]  When true, only the viewport has panned (no zoom/stack change). Skips the stacking algorithm and only updates visible items and X positions.
    * @private
    */
   _redrawItems(forceRestack, lastIsVisible, margin, range) {
+    let scrolledOnly = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
     const restack = forceRestack || this.stackDirty || this.isVisible && !lastIsVisible;
 
-    // if restacking, reposition visible items vertically
-    if (restack) {
-      var _context2, _context3, _context4, _context5, _context6, _context7;
-      // --- uniformItems LOD: determine if fast path is active this frame ---
-      // When active, item discovery and DOM creation still run normally, but
-      // stacking, full repositionX, and repositionY are replaced with the
-      // lightweight repositionXFast.
-      this._uniformItemsFrozen = this.uniformItems && this.itemSet.initialDrawDone && this._uniformItemsHasStacked && this._areUniformItemsTooSmall(range);
+    // ── Pan-only fast path ───────────────────────────────────────────────────
+    // When the viewport only translated (no zoom, no stack-option change) and
+    // nothing else forces a full restack, we can skip the expensive stacking
+    // algorithm.  Item row assignments (top) are invariant under pure panning:
+    // only X positions and the set of visible items change.
+    // _updateItemsInRange already calls repositionX() for every visible item,
+    // so no second pass is needed here.
+    if (scrolledOnly && !restack) {
+      var _context2, _context3, _context4, _context5, _context6, _context7, _context8, _context9;
+      if (!this.isVisible) {
+        // Hide all items for off-screen groups and bail early.
+        for (let i = 0; i < this.visibleItems.length; i++) {
+          if (this.visibleItems[i].displayed) this.visibleItems[i].hide();
+        }
+        this.visibleItems = [];
+        return;
+      }
       const orderedItems = {
         byEnd: _filterInstanceProperty(_context2 = this.orderedItems.byEnd).call(_context2, item => !item.isCluster),
         byStart: _filterInstanceProperty(_context3 = this.orderedItems.byStart).call(_context3, item => !item.isCluster)
@@ -41101,15 +41112,38 @@ class Group {
         byEnd: [...new _Set(_filterInstanceProperty(_context4 = _mapInstanceProperty(_context5 = this.orderedItems.byEnd).call(_context5, item => item.cluster)).call(_context4, item => !!item))],
         byStart: [...new _Set(_filterInstanceProperty(_context6 = _mapInstanceProperty(_context7 = this.orderedItems.byStart).call(_context7, item => item.cluster)).call(_context6, item => !!item))]
       };
+      const visibleItems = this._updateItemsInRange(orderedItems, _filterInstanceProperty(_context8 = this.visibleItems).call(_context8, item => !item.isCluster), range);
+      const visibleClusters = this._updateClustersInRange(orderedClusters, _filterInstanceProperty(_context9 = this.visibleItems).call(_context9, item => item.isCluster), range);
+      this.visibleItems = [...visibleItems, ...visibleClusters];
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    // if restacking, reposition visible items vertically
+    if (restack) {
+      var _context0, _context1, _context10, _context11, _context12, _context13;
+      // --- uniformItems LOD: determine if fast path is active this frame ---
+      // When active, item discovery and DOM creation still run normally, but
+      // stacking, full repositionX, and repositionY are replaced with the
+      // lightweight repositionXFast.
+      this._uniformItemsFrozen = this.uniformItems && this.itemSet.initialDrawDone && this._uniformItemsHasStacked && this._areUniformItemsTooSmall(range);
+      const orderedItems = {
+        byEnd: _filterInstanceProperty(_context0 = this.orderedItems.byEnd).call(_context0, item => !item.isCluster),
+        byStart: _filterInstanceProperty(_context1 = this.orderedItems.byStart).call(_context1, item => !item.isCluster)
+      };
+      const orderedClusters = {
+        byEnd: [...new _Set(_filterInstanceProperty(_context10 = _mapInstanceProperty(_context11 = this.orderedItems.byEnd).call(_context11, item => item.cluster)).call(_context10, item => !!item))],
+        byStart: [...new _Set(_filterInstanceProperty(_context12 = _mapInstanceProperty(_context13 = this.orderedItems.byStart).call(_context13, item => item.cluster)).call(_context12, item => !!item))]
+      };
 
       /**
        * Get all visible items in range
        * @return {array} items
        */
       const getVisibleItems = () => {
-        var _context8, _context9;
-        const visibleItems = this._updateItemsInRange(orderedItems, _filterInstanceProperty(_context8 = this.visibleItems).call(_context8, item => !item.isCluster), range);
-        const visibleClusters = this._updateClustersInRange(orderedClusters, _filterInstanceProperty(_context9 = this.visibleItems).call(_context9, item => item.isCluster), range);
+        var _context14, _context15;
+        const visibleItems = this._updateItemsInRange(orderedItems, _filterInstanceProperty(_context14 = this.visibleItems).call(_context14, item => !item.isCluster), range);
+        const visibleClusters = this._updateClustersInRange(orderedClusters, _filterInstanceProperty(_context15 = this.visibleItems).call(_context15, item => item.isCluster), range);
         return [...visibleItems, ...visibleClusters];
       };
 
@@ -41121,9 +41155,9 @@ class Group {
       const getVisibleItemsGroupedBySubgroup = orderFn => {
         let visibleSubgroupsItems = {};
         for (const subgroup in this.subgroups) {
-          var _context0;
+          var _context16;
           if (!Object.prototype.hasOwnProperty.call(this.subgroups, subgroup)) continue;
-          const items = _filterInstanceProperty(_context0 = this.visibleItems).call(_context0, item => item.data.subgroup === subgroup);
+          const items = _filterInstanceProperty(_context16 = this.visibleItems).call(_context16, item => item.data.subgroup === subgroup);
           visibleSubgroupsItems[subgroup] = orderFn ? _sortInstanceProperty(items).call(items, (a, b) => orderFn(a.data, b.data)) : items;
         }
         return visibleSubgroupsItems;
@@ -41142,15 +41176,15 @@ class Group {
           this.visibleItems = getVisibleItems();
           this._updateSubGroupHeights(margin);
         } else {
-          var _context1, _context10, _context11, _context12;
+          var _context17, _context18, _context19, _context20;
           this.visibleItems = getVisibleItems();
           this._updateSubGroupHeights(margin);
           // order all items and force a restacking
           // order all items outside clusters and force a restacking
-          const customOrderedItems = _sortInstanceProperty(_context1 = _filterInstanceProperty(_context10 = _sliceInstanceProperty(_context11 = this.visibleItems).call(_context11)).call(_context10, item => item.isCluster || !item.isCluster && !item.cluster)).call(_context1, (a, b) => {
+          const customOrderedItems = _sortInstanceProperty(_context17 = _filterInstanceProperty(_context18 = _sliceInstanceProperty(_context19 = this.visibleItems).call(_context19)).call(_context18, item => item.isCluster || !item.isCluster && !item.cluster)).call(_context17, (a, b) => {
             return me.itemSet.options.order(a.data, b.data);
           });
-          this.shouldBailStackItems = stack(customOrderedItems, margin, true, _bindInstanceProperty(_context12 = this._shouldBailItemsRedraw).call(_context12, this));
+          this.shouldBailStackItems = stack(customOrderedItems, margin, true, _bindInstanceProperty(_context20 = this._shouldBailItemsRedraw).call(_context20, this));
         }
       } else {
         // no custom order function, lazy stacking
@@ -41165,9 +41199,9 @@ class Group {
             const visibleSubgroupsItems = getVisibleItemsGroupedBySubgroup();
             stackSubgroupsWithInnerStack(visibleSubgroupsItems, margin, this.subgroups);
           } else {
-            var _context13;
+            var _context21;
             // TODO: ugly way to access options...
-            this.shouldBailStackItems = stack(this.visibleItems, margin, true, _bindInstanceProperty(_context13 = this._shouldBailItemsRedraw).call(_context13, this));
+            this.shouldBailStackItems = stack(this.visibleItems, margin, true, _bindInstanceProperty(_context21 = this._shouldBailItemsRedraw).call(_context21, this));
           }
         } else {
           // no stacking
@@ -41254,10 +41288,12 @@ class Group {
    * @param {{item: {horizontal: number, vertical: number}, axis: number}} margin
    * @param {boolean} [forceRestack=false]  Force restacking of all items
    * @param {boolean} [returnQueue=false]  return the queue or if the group resized
+   * @param {boolean} [scrolledOnly=false]  When true, only the viewport has panned (no zoom/stack change). Enables the pan-only fast path that skips stacking.
    * @return {boolean} Returns true if the group is resized or the redraw queue if returnQueue=true
    */
   redraw(range, margin, forceRestack, returnQueue) {
-    var _context14, _context15, _context18, _context20, _context24;
+    var _context22, _context23, _context26, _context28, _context32;
+    let scrolledOnly = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
     let resized = false;
     const lastIsVisible = this.isVisible;
     let height;
@@ -41265,36 +41301,36 @@ class Group {
       forceRestack = this._didMarkerHeightChange.call(this) || forceRestack;
     },
     // recalculate the height of the subgroups
-    _bindInstanceProperty(_context14 = this._updateSubGroupHeights).call(_context14, this, margin),
+    _bindInstanceProperty(_context22 = this._updateSubGroupHeights).call(_context22, this, margin),
     // calculate actual size and position
-    _bindInstanceProperty(_context15 = this._calculateGroupSizeAndPosition).call(_context15, this), () => {
-      var _context16;
-      this.isVisible = _bindInstanceProperty(_context16 = this._isGroupVisible).call(_context16, this)(range, margin);
+    _bindInstanceProperty(_context23 = this._calculateGroupSizeAndPosition).call(_context23, this), () => {
+      var _context24;
+      this.isVisible = _bindInstanceProperty(_context24 = this._isGroupVisible).call(_context24, this)(range, margin);
     }, () => {
-      var _context17;
-      _bindInstanceProperty(_context17 = this._redrawItems).call(_context17, this)(forceRestack, lastIsVisible, margin, range);
+      var _context25;
+      _bindInstanceProperty(_context25 = this._redrawItems).call(_context25, this)(forceRestack, lastIsVisible, margin, range, scrolledOnly);
     },
     // update subgroups
-    _bindInstanceProperty(_context18 = this._updateSubgroupsSizes).call(_context18, this), () => {
-      var _context19;
-      height = this.height = _bindInstanceProperty(_context19 = this._calculateHeight).call(_context19, this)(margin);
+    _bindInstanceProperty(_context26 = this._updateSubgroupsSizes).call(_context26, this), () => {
+      var _context27;
+      height = this.height = _bindInstanceProperty(_context27 = this._calculateHeight).call(_context27, this)(margin);
     },
     // calculate actual size and position again
-    _bindInstanceProperty(_context20 = this._calculateGroupSizeAndPosition).call(_context20, this), () => {
-      var _context21;
-      resized = _bindInstanceProperty(_context21 = this._didResize).call(_context21, this)(resized, height);
+    _bindInstanceProperty(_context28 = this._calculateGroupSizeAndPosition).call(_context28, this), () => {
+      var _context29;
+      resized = _bindInstanceProperty(_context29 = this._didResize).call(_context29, this)(resized, height);
     }, () => {
-      var _context22;
-      _bindInstanceProperty(_context22 = this._applyGroupHeight).call(_context22, this)(height);
+      var _context30;
+      _bindInstanceProperty(_context30 = this._applyGroupHeight).call(_context30, this)(height);
     }, () => {
-      var _context23;
-      _bindInstanceProperty(_context23 = this._updateItemsVerticalPosition).call(_context23, this)(margin);
-    }, _bindInstanceProperty(_context24 = () => {
+      var _context31;
+      _bindInstanceProperty(_context31 = this._updateItemsVerticalPosition).call(_context31, this)(margin);
+    }, _bindInstanceProperty(_context32 = () => {
       if (!this.isVisible && this.height) {
         resized = false;
       }
       return resized;
-    }).call(_context24, this)];
+    }).call(_context32, this)];
     if (returnQueue) {
       return queue;
     } else {
@@ -41449,7 +41485,7 @@ class Group {
    * @param {Item} item
    */
   add(item) {
-    var _context25;
+    var _context33;
     this.items[item.id] = item;
     item.setParent(this);
     this.stackDirty = true;
@@ -41458,7 +41494,7 @@ class Group {
       this._addToSubgroup(item);
       this.orderSubgroups();
     }
-    if (!_includesInstanceProperty(_context25 = this.visibleItems).call(_context25, item)) {
+    if (!_includesInstanceProperty(_context33 = this.visibleItems).call(_context33, item)) {
       const range = this.itemSet.body.range; // TODO: not nice accessing the range like this
       this._checkIfVisible(item, this.visibleItems, range);
     }
@@ -41501,12 +41537,12 @@ class Group {
     const me = this;
     if (me.subgroups) {
       for (const subgroup in me.subgroups) {
-        var _context26;
+        var _context34;
         if (!Object.prototype.hasOwnProperty.call(me.subgroups, subgroup)) continue;
         const initialEnd = me.subgroups[subgroup].items[0].data.end || me.subgroups[subgroup].items[0].data.start;
         let newStart = me.subgroups[subgroup].items[0].data.start;
         let newEnd = initialEnd - 1;
-        _forEachInstanceProperty(_context26 = me.subgroups[subgroup].items).call(_context26, item => {
+        _forEachInstanceProperty(_context34 = me.subgroups[subgroup].items).call(_context34, item => {
           if (new Date(item.data.start) < new Date(newStart)) {
             newStart = item.data.start;
           }
@@ -41567,14 +41603,14 @@ class Group {
    * @param {Item} item
    */
   remove(item) {
-    var _context27, _context28;
+    var _context35, _context36;
     delete this.items[item.id];
     item.setParent(null);
     this.stackDirty = true;
 
     // remove from visible items
-    const index = _indexOfInstanceProperty(_context27 = this.visibleItems).call(_context27, item);
-    if (index != -1) _spliceInstanceProperty(_context28 = this.visibleItems).call(_context28, index, 1);
+    const index = _indexOfInstanceProperty(_context35 = this.visibleItems).call(_context35, item);
+    if (index != -1) _spliceInstanceProperty(_context36 = this.visibleItems).call(_context36, index, 1);
     if (item.data.subgroup !== undefined) {
       this._removeFromSubgroup(item);
       this.orderSubgroups();
@@ -41591,12 +41627,12 @@ class Group {
     if (subgroupId != undefined) {
       const subgroup = this.subgroups[subgroupId];
       if (subgroup) {
-        var _context29;
-        const itemIndex = _indexOfInstanceProperty(_context29 = subgroup.items).call(_context29, item);
+        var _context37;
+        const itemIndex = _indexOfInstanceProperty(_context37 = subgroup.items).call(_context37, item);
         //  Check the item is actually in this subgroup. How should items not in the group be handled?
         if (itemIndex >= 0) {
-          var _context30;
-          _spliceInstanceProperty(_context30 = subgroup.items).call(_context30, itemIndex, 1);
+          var _context38;
+          _spliceInstanceProperty(_context38 = subgroup.items).call(_context38, itemIndex, 1);
           if (!subgroup.items.length) {
             delete this.subgroups[subgroupId];
           } else {
@@ -45833,7 +45869,11 @@ class ItemSet extends Component {
     const scrolled = range.start != this.lastRangeStart;
     const changedStackOption = options.stack != this.lastStack;
     const changedStackSubgroupsOption = options.stackSubgroups != this.lastStackSubgroups;
-    const forceRestack = zoomed || scrolled || changedStackOption || changedStackSubgroupsOption;
+    // Only force a full restack when the zoom level or stack options change.
+    // A pure pan (scrolled-only) does not change row assignments, so we can
+    // skip the expensive stack algorithm and only update visible items + X positions.
+    const forceRestack = zoomed || changedStackOption || changedStackSubgroupsOption;
+    const scrolledOnly = scrolled && !forceRestack;
     this.lastVisibleInterval = visibleInterval;
     this.lastRangeStart = range.start;
     this.lastStack = options.stack;
@@ -45852,7 +45892,7 @@ class ItemSet extends Component {
     const minHeight = margin.axis + margin.item.vertical;
 
     // redraw the background group
-    this.groups[BACKGROUND].redraw(range, nonFirstMargin, forceRestack);
+    this.groups[BACKGROUND].redraw(range, nonFirstMargin, forceRestack, false, scrolledOnly);
     const redrawQueue = {};
     let redrawQueueLength = 0;
 
@@ -45861,7 +45901,7 @@ class ItemSet extends Component {
       if (key === BACKGROUND) return;
       const groupMargin = group == firstGroup ? firstMargin : nonFirstMargin;
       const returnQueue = true;
-      redrawQueue[key] = group.redraw(range, groupMargin, forceRestack, returnQueue);
+      redrawQueue[key] = group.redraw(range, groupMargin, forceRestack, returnQueue, scrolledOnly);
       redrawQueueLength = redrawQueue[key].length;
     });
     const needRedraw = redrawQueueLength > 0;

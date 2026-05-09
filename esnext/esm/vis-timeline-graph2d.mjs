@@ -5,7 +5,7 @@
  * Create a fully customizable, interactive timeline with items and ranges.
  *
  * @version 0.0.0-no-version
- * @date    2026-04-19T06:44:17.642Z
+ * @date    2026-05-09T20:30:24.360Z
  *
  * @copyright (c) 2011-2017 Almende B.V, http://almende.com
  * @copyright (c) 2017-2019 visjs contributors, https://github.com/visjs
@@ -7302,11 +7302,71 @@ class Group {
    * @param {boolean} lastIsVisible
    * @param {number} margin
    * @param {object} range
+   * @param {boolean} [scrolledOnly=false]  When true, only the viewport has panned (no zoom/stack change). Skips the stacking algorithm and only updates visible items and X positions.
    * @private
    */
-  _redrawItems(forceRestack, lastIsVisible, margin, range) {
+  _redrawItems(
+    forceRestack,
+    lastIsVisible,
+    margin,
+    range,
+    scrolledOnly = false,
+  ) {
     const restack =
       forceRestack || this.stackDirty || (this.isVisible && !lastIsVisible);
+
+    // ── Pan-only fast path ───────────────────────────────────────────────────
+    // When the viewport only translated (no zoom, no stack-option change) and
+    // nothing else forces a full restack, we can skip the expensive stacking
+    // algorithm.  Item row assignments (top) are invariant under pure panning:
+    // only X positions and the set of visible items change.
+    // _updateItemsInRange already calls repositionX() for every visible item,
+    // so no second pass is needed here.
+    if (scrolledOnly && !restack) {
+      if (!this.isVisible) {
+        // Hide all items for off-screen groups and bail early.
+        for (let i = 0; i < this.visibleItems.length; i++) {
+          if (this.visibleItems[i].displayed) this.visibleItems[i].hide();
+        }
+        this.visibleItems = [];
+        return;
+      }
+
+      const orderedItems = {
+        byEnd: this.orderedItems.byEnd.filter((item) => !item.isCluster),
+        byStart: this.orderedItems.byStart.filter((item) => !item.isCluster),
+      };
+      const orderedClusters = {
+        byEnd: [
+          ...new Set(
+            this.orderedItems.byEnd
+              .map((item) => item.cluster)
+              .filter((item) => !!item),
+          ),
+        ],
+        byStart: [
+          ...new Set(
+            this.orderedItems.byStart
+              .map((item) => item.cluster)
+              .filter((item) => !!item),
+          ),
+        ],
+      };
+
+      const visibleItems = this._updateItemsInRange(
+        orderedItems,
+        this.visibleItems.filter((item) => !item.isCluster),
+        range,
+      );
+      const visibleClusters = this._updateClustersInRange(
+        orderedClusters,
+        this.visibleItems.filter((item) => item.isCluster),
+        range,
+      );
+      this.visibleItems = [...visibleItems, ...visibleClusters];
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     // if restacking, reposition visible items vertically
     if (restack) {
@@ -7546,9 +7606,10 @@ class Group {
    * @param {{item: {horizontal: number, vertical: number}, axis: number}} margin
    * @param {boolean} [forceRestack=false]  Force restacking of all items
    * @param {boolean} [returnQueue=false]  return the queue or if the group resized
+   * @param {boolean} [scrolledOnly=false]  When true, only the viewport has panned (no zoom/stack change). Enables the pan-only fast path that skips stacking.
    * @return {boolean} Returns true if the group is resized or the redraw queue if returnQueue=true
    */
-  redraw(range, margin, forceRestack, returnQueue) {
+  redraw(range, margin, forceRestack, returnQueue, scrolledOnly = false) {
     let resized = false;
     const lastIsVisible = this.isVisible;
     let height;
@@ -7574,6 +7635,7 @@ class Group {
           lastIsVisible,
           margin,
           range,
+          scrolledOnly,
         );
       },
 
@@ -12669,8 +12731,12 @@ class ItemSet extends Component {
     const changedStackOption = options.stack != this.lastStack;
     const changedStackSubgroupsOption =
       options.stackSubgroups != this.lastStackSubgroups;
+    // Only force a full restack when the zoom level or stack options change.
+    // A pure pan (scrolled-only) does not change row assignments, so we can
+    // skip the expensive stack algorithm and only update visible items + X positions.
     const forceRestack =
-      zoomed || scrolled || changedStackOption || changedStackSubgroupsOption;
+      zoomed || changedStackOption || changedStackSubgroupsOption;
+    const scrolledOnly = scrolled && !forceRestack;
     this.lastVisibleInterval = visibleInterval;
     this.lastRangeStart = range.start;
     this.lastStack = options.stack;
@@ -12690,7 +12756,13 @@ class ItemSet extends Component {
     const minHeight = margin.axis + margin.item.vertical;
 
     // redraw the background group
-    this.groups[BACKGROUND].redraw(range, nonFirstMargin, forceRestack);
+    this.groups[BACKGROUND].redraw(
+      range,
+      nonFirstMargin,
+      forceRestack,
+      false,
+      scrolledOnly,
+    );
 
     const redrawQueue = {};
     let redrawQueueLength = 0;
@@ -12705,6 +12777,7 @@ class ItemSet extends Component {
         groupMargin,
         forceRestack,
         returnQueue,
+        scrolledOnly,
       );
       redrawQueueLength = redrawQueue[key].length;
     });
